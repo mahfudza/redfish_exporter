@@ -11,8 +11,8 @@ import (
 
 	"log/slog"
 
-	"github.com/flxpeters/redfish_exporter/collector"
 	kitlog "github.com/go-kit/log"
+	"github.com/mahfudza/redfish_exporter/collector"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 

@@ -14,14 +14,15 @@ import (
 var (
 	SystemSubsystem                   = "system"
 	SystemLabelNames                  = []string{"hostname", "resource", "system_id"}
-	SystemMemoryLabelNames            = []string{"hostname", "resource", "memory", "memory_id"}
-	SystemProcessorLabelNames         = []string{"hostname", "resource", "processor", "processor_id"}
+	SystemBiosLabelNames              = []string{"hostname", "resource", "system_id", "version"}
+	SystemMemoryLabelNames            = []string{"hostname", "resource", "memory", "memory_id", "serial_number", "part_number"}
+	SystemProcessorLabelNames         = []string{"hostname", "resource", "processor", "processor_id", "processor_model"}
 	SystemVolumeLabelNames            = []string{"hostname", "resource", "volume", "volume_id"}
-	SystemDriveLabelNames             = []string{"hostname", "resource", "drive", "drive_id"}
+	SystemDriveLabelNames             = []string{"hostname", "resource", "drive", "drive_id", "model", "part_number", "serial_number", "media_type", "protocol"}
 	SystemStorageControllerLabelNames = []string{"hostname", "resource", "storage_controller", "storage_controller_id"}
 	SystemPCIeDeviceLabelNames        = []string{"hostname", "resource", "pcie_device", "pcie_device_id", "pcie_device_partnumber", "pcie_device_type", "pcie_serial_number"}
 	SystemNetworkInterfaceLabelNames  = []string{"hostname", "resource", "network_interface", "network_interface_id"}
-	SystemEthernetInterfaceLabelNames = []string{"hostname", "resource", "ethernet_interface", "ethernet_interface_id", "ethernet_interface_speed"}
+	SystemEthernetInterfaceLabelNames = []string{"hostname", "resource", "ethernet_interface", "ethernet_interface_id", "ethernet_interface_speed", "mac_address"}
 	SystemPCIeFunctionLabelNames      = []string{"hostname", "resource", "pcie_function_name", "pcie_function_id", "pci_function_deviceclass", "pci_function_type"}
 
 	SystemLogServiceLabelNames = []string{"system_id", "log_service", "log_service_id", "log_service_enabled", "log_service_overwrite_policy"}
@@ -44,6 +45,7 @@ func createSystemMetricMap() map[string]Metric {
 	addToMetricMap(systemMetrics, SystemSubsystem, "state", fmt.Sprintf("system state,%s", CommonStateHelp), SystemLabelNames)
 	addToMetricMap(systemMetrics, SystemSubsystem, "health_state", fmt.Sprintf("system health,%s", CommonHealthHelp), SystemLabelNames)
 	addToMetricMap(systemMetrics, SystemSubsystem, "power_state", "system power state", SystemLabelNames)
+	addToMetricMap(systemMetrics, SystemSubsystem, "bios", "system BIOS", SystemBiosLabelNames)
 
 	addToMetricMap(systemMetrics, SystemSubsystem, "total_memory_state", fmt.Sprintf("system overall memory state,%s", CommonStateHelp), SystemLabelNames)
 	addToMetricMap(systemMetrics, SystemSubsystem, "total_memory_health_state", fmt.Sprintf("system overall memory health,%s", CommonHealthHelp), SystemLabelNames)
@@ -69,6 +71,7 @@ func createSystemMetricMap() map[string]Metric {
 	addToMetricMap(systemMetrics, SystemSubsystem, "storage_drive_state", fmt.Sprintf("system storage drive state,%s", CommonStateHelp), SystemDriveLabelNames)
 	addToMetricMap(systemMetrics, SystemSubsystem, "storage_drive_health_state", fmt.Sprintf("system storage drive health state,%s", CommonHealthHelp), SystemDriveLabelNames)
 	addToMetricMap(systemMetrics, SystemSubsystem, "storage_drive_capacity", "system storage drive capacity, Bytes", SystemDriveLabelNames)
+	addToMetricMap(systemMetrics, SystemSubsystem, "storage_drive_media_life_left", "system storage drive predicted media life left percentage", SystemDriveLabelNames)
 
 	addToMetricMap(systemMetrics, SystemSubsystem, "storage_controller_state", fmt.Sprintf("system storage controller state,%s", CommonStateHelp), SystemStorageControllerLabelNames)
 	addToMetricMap(systemMetrics, SystemSubsystem, "storage_controller_health_state", fmt.Sprintf("system storage controller health state,%s", CommonHealthHelp), SystemStorageControllerLabelNames)
@@ -168,6 +171,12 @@ func (s *SystemCollector) Collect(ch chan<- prometheus.Metric) {
 			}
 			if systemTotalMemoryHealthStateValue, ok := parseCommonStatusHealth(systemTotalMemoryHealthState); ok {
 				ch <- prometheus.MustNewConstMetric(s.metrics["system_total_memory_health_state"].desc, prometheus.GaugeValue, systemTotalMemoryHealthStateValue, systemLabelValues...)
+			}
+
+			// Collect BIOS version
+			if system.BIOSVersion != "" {
+				biosLabelValues := []string{systemHostName, "system", SystemID, system.BIOSVersion}
+				ch <- prometheus.MustNewConstMetric(s.metrics["system_bios"].desc, prometheus.GaugeValue, 1, biosLabelValues...)
 			}
 
 			wg1 := &sync.WaitGroup{}
@@ -327,11 +336,13 @@ func parseMemory(ch chan<- prometheus.Metric, systemHostName string, memory *red
 	defer wg.Done()
 	memoryName := memory.Name
 	memoryID := memory.ID
+	memorySerialNumber := memory.SerialNumber
+	memoryPartNumber := memory.PartNumber
 	memoryCapacityMiB := memory.CapacityMiB
 	memoryState := memory.Status.State
 	memoryHealthState := memory.Status.Health
 
-	systemMemoryLabelValues := []string{systemHostName, "memory", memoryName, memoryID}
+	systemMemoryLabelValues := []string{systemHostName, "memory", memoryName, memoryID, memorySerialNumber, memoryPartNumber}
 	if memoryStateValue, ok := parseCommonStatusState(memoryState); ok {
 		ch <- prometheus.MustNewConstMetric(systemMetrics["system_memory_state"].desc, prometheus.GaugeValue, memoryStateValue, systemMemoryLabelValues...)
 	}
@@ -339,19 +350,19 @@ func parseMemory(ch chan<- prometheus.Metric, systemHostName string, memory *red
 		ch <- prometheus.MustNewConstMetric(systemMetrics["system_memory_health_state"].desc, prometheus.GaugeValue, memoryHealthStateValue, systemMemoryLabelValues...)
 	}
 	ch <- prometheus.MustNewConstMetric(systemMetrics["system_memory_capacity"].desc, prometheus.GaugeValue, float64(memoryCapacityMiB), systemMemoryLabelValues...)
-
 }
 
 func parseProcessor(ch chan<- prometheus.Metric, systemHostName string, processor *redfish.Processor, wg *sync.WaitGroup) {
 	defer wg.Done()
 	processorName := processor.Name
 	processorID := processor.ID
+	processorModel := processor.Model
 	processorTotalCores := processor.TotalCores
 	processorTotalThreads := processor.TotalThreads
 	processorState := processor.Status.State
 	processorHelathState := processor.Status.Health
 
-	systemProcessorLabelValues := []string{systemHostName, "processor", processorName, processorID}
+	systemProcessorLabelValues := []string{systemHostName, "processor", processorName, processorID, processorModel}
 
 	if processorStateValue, ok := parseCommonStatusState(processorState); ok {
 		ch <- prometheus.MustNewConstMetric(systemMetrics["system_processor_state"].desc, prometheus.GaugeValue, processorStateValue, systemProcessorLabelValues...)
@@ -384,10 +395,16 @@ func parseDrive(ch chan<- prometheus.Metric, systemHostName string, drive *redfi
 	defer wg.Done()
 	driveName := drive.Name
 	driveID := drive.ID
+	driveModel := drive.Model
+	drivePartNumber := drive.PartNumber
+	driveSerialNumber := drive.SerialNumber
 	driveCapacityBytes := drive.CapacityBytes
 	driveState := drive.Status.State
 	driveHealthState := drive.Status.Health
-	systemdriveLabelValues := []string{systemHostName, "drive", driveName, driveID}
+	driveMediaLifeLeft := drive.PredictedMediaLifeLeftPercent
+	driveMediaType := fmt.Sprint(drive.MediaType)
+	driveProtocol := fmt.Sprint(drive.Protocol)
+	systemdriveLabelValues := []string{systemHostName, "drive", driveName, driveID, driveModel, drivePartNumber, driveSerialNumber, driveMediaType, driveProtocol}
 	if driveStateValue, ok := parseCommonStatusState(driveState); ok {
 		ch <- prometheus.MustNewConstMetric(systemMetrics["system_storage_drive_state"].desc, prometheus.GaugeValue, driveStateValue, systemdriveLabelValues...)
 	}
@@ -395,6 +412,11 @@ func parseDrive(ch chan<- prometheus.Metric, systemHostName string, drive *redfi
 		ch <- prometheus.MustNewConstMetric(systemMetrics["system_storage_drive_health_state"].desc, prometheus.GaugeValue, driveHealthStateValue, systemdriveLabelValues...)
 	}
 	ch <- prometheus.MustNewConstMetric(systemMetrics["system_storage_drive_capacity"].desc, prometheus.GaugeValue, float64(driveCapacityBytes), systemdriveLabelValues...)
+
+	// Add new metrics for drive health prediction
+	if driveMediaLifeLeft != 0 {
+		ch <- prometheus.MustNewConstMetric(systemMetrics["system_storage_drive_media_life_left"].desc, prometheus.GaugeValue, float64(driveMediaLifeLeft), systemdriveLabelValues...)
+	}
 }
 
 func parsePcieDevice(ch chan<- prometheus.Metric, systemHostName string, pcieDevice *redfish.PCIeDevice, wg *sync.WaitGroup) {
@@ -440,9 +462,11 @@ func parseEthernetInterface(ch chan<- prometheus.Metric, systemHostName string, 
 	ethernetInterfaceLinkStatus := ethernetInterface.LinkStatus
 	ethernetInterfaceEnabled := ethernetInterface.InterfaceEnabled
 	ethernetInterfaceSpeed := fmt.Sprintf("%d Mbps", ethernetInterface.SpeedMbps)
+	ethernetInterfaceMACAddress := ethernetInterface.MACAddress
 	ethernetInterfaceState := ethernetInterface.Status.State
 	ethernetInterfaceHealthState := ethernetInterface.Status.Health
-	systemEthernetInterfaceLabelValues := []string{systemHostName, "ethernet_interface", ethernetInterfaceName, ethernetInterfaceID, ethernetInterfaceSpeed}
+	systemEthernetInterfaceLabelValues := []string{systemHostName, "ethernet_interface", ethernetInterfaceName, ethernetInterfaceID, ethernetInterfaceSpeed, ethernetInterfaceMACAddress}
+
 	if ethernetInterfaceStateValue, ok := parseCommonStatusState(ethernetInterfaceState); ok {
 		ch <- prometheus.MustNewConstMetric(systemMetrics["system_ethernet_interface_state"].desc, prometheus.GaugeValue, ethernetInterfaceStateValue, systemEthernetInterfaceLabelValues...)
 	}

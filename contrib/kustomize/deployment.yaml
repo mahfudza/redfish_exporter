@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
         - name: redfish-exporter
-          image: ghcr.io/flxpeters/redfish_exporter:latest
+          image: ghcr.io/mahfudza/redfish_exporter:latest
           command:
             - /redfish_exporter
             - --config.file=/etc/exporter/redfish_exporter.yml

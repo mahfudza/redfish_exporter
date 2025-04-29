@@ -1,4 +1,4 @@
-module github.com/flxpeters/redfish_exporter
+module github.com/mahfudza/redfish_exporter
 
 go 1.21
 

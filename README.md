@@ -1,7 +1,7 @@
 # redfish_exporter
 
-[![test-and-lint](https://github.com/FlxPeters/redfish_exporter/actions/workflows/test-and-lint.yml/badge.svg)](https://github.com/FlxPeters/redfish_exporter/actions/workflows/test-and-lint.yml)
-[![goreleaser](https://github.com/FlxPeters/redfish_exporter/actions/workflows/build-goreleaser.yml/badge.svg)](https://github.com/FlxPeters/redfish_exporter/actions/workflows/build-goreleaser.yml)
+[![test-and-lint](https://github.com/mahfudza/redfish_exporter/actions/workflows/test-and-lint.yml/badge.svg)](https://github.com/mahfudza/redfish_exporter/actions/workflows/test-and-lint.yml)
+[![goreleaser](https://github.com/mahfudza/redfish_exporter/actions/workflows/build-goreleaser.yml/badge.svg)](https://github.com/mahfudza/redfish_exporter/actions/workflows/build-goreleaser.yml)
 
 
 A Prometheus exporter to get metrics from Redfish based hardware servers.
@@ -52,7 +52,7 @@ Run `redfish_exporter -h` for more options.
 We also provide a ready to use container image via Github's Container registry. Run the following command in order to start the exporter via Docekr or Podman:
 
 ```sh
-docker run -v ./config.demo.yaml:/redfish_exporter.yml:ro,z -p 9610:9610 ghcr.io/flxpeters/redfish_exporter:latest
+docker run -v ./config.demo.yaml:/redfish_exporter.yml:ro,z -p 9610:9610 ghcr.io/mahfudza/redfish_exporter:latest
 ```
 
 Remember to replace your config  `/redfish_exporter.yml` in the container with your own one.

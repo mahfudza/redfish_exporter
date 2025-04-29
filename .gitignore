@@ -21,6 +21,7 @@ redfish_exporter
 
 # config file
 config.yml
+config.demo.yaml
 
 # IDE files
 .vscode

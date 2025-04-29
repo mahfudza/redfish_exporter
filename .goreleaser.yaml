@@ -1,14 +1,16 @@
+version: 2
 project_name: redfish_exporter
 builds:
   - id: default
     goos:
     - linux
+    - darwin
     env:
       - CGO_ENABLED=0
 dockers:
   - id: ghcr.io
     image_templates:
-      - "ghcr.io/flxpeters/{{ .ProjectName }}:{{ .Tag }}"
-      - "ghcr.io/flxpeters/{{ .ProjectName }}:latest"
+      - "ghcr.io/mahfudza/{{ .ProjectName }}:{{ .Tag }}"
+      - "ghcr.io/mahfudza/{{ .ProjectName }}:latest"
     extra_files:
       - config.example.yml
