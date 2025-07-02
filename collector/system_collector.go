@@ -15,14 +15,14 @@ var (
 	SystemSubsystem                   = "system"
 	SystemLabelNames                  = []string{"hostname", "resource", "system_id"}
 	SystemBiosLabelNames              = []string{"hostname", "resource", "system_id", "version"}
-	SystemMemoryLabelNames            = []string{"hostname", "resource", "memory", "memory_id", "serial_number", "part_number"}
+	SystemMemoryLabelNames            = []string{"hostname", "resource", "memory", "memory_id", "part_number"}
 	SystemProcessorLabelNames         = []string{"hostname", "resource", "processor", "processor_id", "processor_model"}
 	SystemVolumeLabelNames            = []string{"hostname", "resource", "volume", "volume_id"}
 	SystemDriveLabelNames             = []string{"hostname", "resource", "drive", "drive_id", "model", "part_number", "serial_number", "media_type", "protocol"}
 	SystemStorageControllerLabelNames = []string{"hostname", "resource", "storage_controller", "storage_controller_id"}
 	SystemPCIeDeviceLabelNames        = []string{"hostname", "resource", "pcie_device", "pcie_device_id", "pcie_device_partnumber", "pcie_device_type", "pcie_serial_number"}
 	SystemNetworkInterfaceLabelNames  = []string{"hostname", "resource", "network_interface", "network_interface_id"}
-	SystemEthernetInterfaceLabelNames = []string{"hostname", "resource", "ethernet_interface", "ethernet_interface_id", "ethernet_interface_speed", "mac_address"}
+	SystemEthernetInterfaceLabelNames = []string{"hostname", "resource", "ethernet_interface", "ethernet_interface_id", "ethernet_interface_speed"}
 	SystemPCIeFunctionLabelNames      = []string{"hostname", "resource", "pcie_function_name", "pcie_function_id", "pci_function_deviceclass", "pci_function_type"}
 
 	SystemLogServiceLabelNames = []string{"system_id", "log_service", "log_service_id", "log_service_enabled", "log_service_overwrite_policy"}
@@ -336,13 +336,12 @@ func parseMemory(ch chan<- prometheus.Metric, systemHostName string, memory *red
 	defer wg.Done()
 	memoryName := memory.Name
 	memoryID := memory.ID
-	memorySerialNumber := memory.SerialNumber
 	memoryPartNumber := memory.PartNumber
 	memoryCapacityMiB := memory.CapacityMiB
 	memoryState := memory.Status.State
 	memoryHealthState := memory.Status.Health
 
-	systemMemoryLabelValues := []string{systemHostName, "memory", memoryName, memoryID, memorySerialNumber, memoryPartNumber}
+	systemMemoryLabelValues := []string{systemHostName, "memory", memoryName, memoryID, memoryPartNumber}
 	if memoryStateValue, ok := parseCommonStatusState(memoryState); ok {
 		ch <- prometheus.MustNewConstMetric(systemMetrics["system_memory_state"].desc, prometheus.GaugeValue, memoryStateValue, systemMemoryLabelValues...)
 	}
@@ -462,10 +461,9 @@ func parseEthernetInterface(ch chan<- prometheus.Metric, systemHostName string, 
 	ethernetInterfaceLinkStatus := ethernetInterface.LinkStatus
 	ethernetInterfaceEnabled := ethernetInterface.InterfaceEnabled
 	ethernetInterfaceSpeed := fmt.Sprintf("%d Mbps", ethernetInterface.SpeedMbps)
-	ethernetInterfaceMACAddress := ethernetInterface.MACAddress
 	ethernetInterfaceState := ethernetInterface.Status.State
 	ethernetInterfaceHealthState := ethernetInterface.Status.Health
-	systemEthernetInterfaceLabelValues := []string{systemHostName, "ethernet_interface", ethernetInterfaceName, ethernetInterfaceID, ethernetInterfaceSpeed, ethernetInterfaceMACAddress}
+	systemEthernetInterfaceLabelValues := []string{systemHostName, "ethernet_interface", ethernetInterfaceName, ethernetInterfaceID, ethernetInterfaceSpeed}
 
 	if ethernetInterfaceStateValue, ok := parseCommonStatusState(ethernetInterfaceState); ok {
 		ch <- prometheus.MustNewConstMetric(systemMetrics["system_ethernet_interface_state"].desc, prometheus.GaugeValue, ethernetInterfaceStateValue, systemEthernetInterfaceLabelValues...)
