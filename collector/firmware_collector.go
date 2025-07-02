@@ -13,7 +13,7 @@ import (
 // FirmwareSubsystem is the firmware subsystem
 var (
 	FirmwareSubsystem  = "firmware"
-	FirmwareLabelNames = []string{"name", "version"}
+	FirmwareLabelNames = []string{"name", "version", "updateable"}
 	firmwareMetrics    = createFirmwareMetricMap()
 )
 
