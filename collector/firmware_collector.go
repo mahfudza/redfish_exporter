@@ -3,6 +3,8 @@ package collector
 import (
 	"fmt"
 	"log/slog"
+	"regexp"
+	"strconv"
 	"sync"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -16,6 +18,31 @@ var (
 	FirmwareLabelNames = []string{"name", "version", "updateable"}
 	firmwareMetrics    = createFirmwareMetricMap()
 )
+
+// removeMACAddress removes MAC addresses from firmware names to reduce cardinality
+func removeMACAddress(firmwareName string) string {
+	// Regular expression to match MAC address patterns
+	// Matches patterns like: 2C:EA:7F:58:84:72, 2C-EA-7F-58-84-72, 2CEA7F588472
+	macPattern := regexp.MustCompile(`[0-9A-Fa-f]{2}[:-]?[0-9A-Fa-f]{2}[:-]?[0-9A-Fa-f]{2}[:-]?[0-9A-Fa-f]{2}[:-]?[0-9A-Fa-f]{2}[:-]?[0-9A-Fa-f]{2}`)
+
+	// Remove MAC addresses from the name
+	cleanedName := macPattern.ReplaceAllString(firmwareName, "")
+
+	// Clean up any extra spaces, dashes, or separators that might be left
+	// Remove multiple spaces
+	spacePattern := regexp.MustCompile(`\s+`)
+	cleanedName = spacePattern.ReplaceAllString(cleanedName, " ")
+
+	// Remove leading/trailing spaces and dashes
+	cleanedName = regexp.MustCompile(`^[\s\-]+|[\s\-]+$`).ReplaceAllString(cleanedName, "")
+
+	// Remove double dashes or spaces around dashes
+	cleanedName = regexp.MustCompile(`\s*-\s*`).ReplaceAllString(cleanedName, " - ")
+	cleanedName = regexp.MustCompile(`\s+`).ReplaceAllString(cleanedName, " ")
+	cleanedName = regexp.MustCompile(`^[\s\-]+|[\s\-]+$`).ReplaceAllString(cleanedName, "")
+
+	return cleanedName
+}
 
 // FirmwareCollector implements the prometheus.Collector.
 type FirmwareCollector struct {
@@ -138,16 +165,18 @@ func (f *FirmwareCollector) Collect(ch chan<- prometheus.Metric) {
 		go func(firmware *redfish.SoftwareInventory) {
 			defer wg.Done()
 
-			firmwareName := firmware.Name
+			firmwareName := removeMACAddress(firmware.Name)
 			firmwareVersion := firmware.Version
 			firmwareUpdateable := firmware.Updateable
 
 			firmwareLabelValues := []string{
 				firmwareName,
 				firmwareVersion,
+				strconv.FormatBool(firmwareUpdateable),
 			}
 			logger.Debug("collecting firmware metric",
-				slog.String("name", firmwareName),
+				slog.String("original_name", firmware.Name),
+				slog.String("cleaned_name", firmwareName),
 				slog.String("version", firmwareVersion),
 				slog.Bool("updateable", firmwareUpdateable),
 			)
