@@ -639,7 +639,6 @@ func processDellBatteryInfo(ch chan<- prometheus.Metric, systemHostName string, 
 
 	// Check if this is a Dell storage with battery information
 	if storage.Oem == nil {
-		logger.Debug("Storage Oem field is nil", slog.String("storage", storage.ID))
 
 		// Try checking if there's an OEM field (different case)
 		if storage.OEM == nil {
