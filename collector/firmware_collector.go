@@ -135,7 +135,7 @@ func (f *FirmwareCollector) Collect(ch chan<- prometheus.Metric) {
 		}
 
 		// Create a unique key based on name and version
-		uniqueKey := fmt.Sprintf("%s-%s", firmware.Name, firmware.Version)
+		uniqueKey := fmt.Sprintf("%s-%s", removeMACAddress(firmware.Name), firmware.Version)
 
 		if !uniqueFirmware[uniqueKey] {
 			uniqueFirmware[uniqueKey] = true
