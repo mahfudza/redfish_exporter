@@ -15,6 +15,7 @@ const (
 	CommonLinkHelp            = "1(LinkUp),2(NoLink),3(LinkDown)"
 	CommonPortLinkHelp        = "1(Up),0(Down)"
 	CommonIntrusionSensorHelp = "1(Normal),2(TamperingDetected),3(HardwareIntrusion)"
+	CommonChargeStateHelp     = "1(Idle),2(Charging),3(Discharging)"
 )
 
 type Metric struct {
@@ -31,6 +32,18 @@ func addToMetricMap(metricMap map[string]Metric, subsystem, name, help string, v
 			nil,
 		),
 	}
+}
+
+func parseCommonChargeState(chargeState redfish.ChargeState) (float64, bool) {
+	switch chargeState {
+	case redfish.IdleChargeState:
+		return float64(1), true
+	case redfish.ChargingChargeState:
+		return float64(2), true
+	case redfish.DischargingChargeState:
+		return float64(3), true
+	}
+	return float64(0), false
 }
 
 func parseLogService(ch chan<- prometheus.Metric, metrics map[string]Metric, subsystem, collectorID string, logService *redfish.LogService, wg *sync.WaitGroup) (err error) {
