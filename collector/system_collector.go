@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -18,10 +19,10 @@ var (
 	SystemBiosLabelNames                     = []string{"hostname", "resource", "system_id", "version"}
 	SystemMemoryLabelNames                   = []string{"hostname", "resource", "memory", "memory_id", "part_number"}
 	SystemProcessorLabelNames                = []string{"hostname", "resource", "processor", "processor_id", "processor_model"}
-	SystemVolumeLabelNames                   = []string{"hostname", "resource", "volume", "volume_id"}
+	SystemVolumeLabelNames                   = []string{"hostname", "resource", "volume", "volume_id", "storage_id", "storage_controller", "storage_controller_id"}
 	SystemDriveLabelNames                    = []string{"hostname", "resource", "drive", "drive_id", "model", "part_number", "serial_number", "media_type", "protocol"}
-	SystemStorageControllerLabelNames        = []string{"hostname", "resource", "storage_controller", "storage_controller_id"}
-	SystemStorageControllerBatteryLabelNames = []string{"hostname", "resource", "storage_controller", "storage_controller_id", "battery", "battery_id", "part_number"}
+	SystemStorageControllerLabelNames        = []string{"hostname", "resource", "storage_controller", "storage_controller_id", "serial_number"}
+	SystemStorageControllerBatteryLabelNames = []string{"hostname", "resource", "storage_controller", "storage_controller_id", "battery", "battery_id"}
 
 	SystemPCIeDeviceLabelNames        = []string{"hostname", "resource", "pcie_device", "pcie_device_id", "pcie_device_partnumber", "pcie_device_type", "pcie_serial_number"}
 	SystemNetworkInterfaceLabelNames  = []string{"hostname", "resource", "network_interface", "network_interface_id"}
@@ -81,7 +82,6 @@ func createSystemMetricMap() map[string]Metric {
 
 	addToMetricMap(systemMetrics, SystemSubsystem, "storage_controller_battery_state", fmt.Sprintf("system storage controller battery state,%s", CommonStateHelp), SystemStorageControllerBatteryLabelNames)
 	addToMetricMap(systemMetrics, SystemSubsystem, "storage_controller_battery_health_state", fmt.Sprintf("system storage controller battery health state,%s", CommonHealthHelp), SystemStorageControllerBatteryLabelNames)
-	addToMetricMap(systemMetrics, SystemSubsystem, "storage_controller_battery_charge_state", fmt.Sprintf("system storage controller battery charge state,%s", CommonChargeStateHelp), SystemStorageControllerBatteryLabelNames)
 
 	addToMetricMap(systemMetrics, SystemSubsystem, "pcie_device_state", fmt.Sprintf("system pcie device state,%s", CommonStateHelp), SystemPCIeDeviceLabelNames)
 	addToMetricMap(systemMetrics, SystemSubsystem, "pcie_device_health_state", fmt.Sprintf("system pcie device health state,%s", CommonHealthHelp), SystemPCIeDeviceLabelNames)
@@ -133,13 +133,6 @@ func (s *SystemCollector) Collect(ch chan<- prometheus.Metric) {
 
 	logger := s.logger.With(slog.String("collector", "SystemCollector"))
 	service := s.redfishClient.Service
-
-	// Debug: Check if battery metrics are registered
-	slog.Debug("System metrics registered",
-		slog.Int("total_metrics", len(s.metrics)),
-		slog.Bool("has_battery_state", s.metrics["system_storage_controller_battery_state"].desc != nil),
-		slog.Bool("has_battery_health", s.metrics["system_storage_controller_battery_health_state"].desc != nil),
-		slog.Bool("has_battery_charge", s.metrics["system_storage_controller_battery_charge_state"].desc != nil))
 
 	// get a list of systems from service
 	if systems, err := service.Systems(); err != nil {
@@ -243,13 +236,28 @@ func (s *SystemCollector) Collect(ch chan<- prometheus.Metric) {
 					systemLogger.Debug("Processing storage system",
 						slog.String("storage_id", storage.ID),
 						slog.String("storage_name", storage.Name))
+					// Get storage controller information for volume context
+					var storageControllerName, storageControllerID string
+					volumeControllers, err := storage.Controllers()
+					if err == nil && volumeControllers != nil && len(volumeControllers) > 0 {
+						storageControllerName = volumeControllers[0].Name
+						storageControllerID = volumeControllers[0].ID
+						systemLogger.Debug("Found storage controller for volume context",
+							slog.String("storage", storage.ID),
+							slog.String("controller_name", storageControllerName),
+							slog.String("controller_id", storageControllerID))
+					} else {
+						systemLogger.Debug("No storage controllers found for volume context",
+							slog.String("storage", storage.ID))
+					}
+
 					if volumes, err := storage.Volumes(); err != nil {
 						systemLogger.Error("error getting storage data from system", slog.String("operation", "system.Volumes()"), slog.Any("wrror", err))
 					} else {
 						wg3.Add(len(volumes))
 
 						for _, volume := range volumes {
-							go parseVolume(ch, systemHostName, volume, wg3)
+							go parseVolume(ch, systemHostName, volume, storage.ID, storageControllerName, storageControllerID, wg3)
 						}
 					}
 
@@ -285,19 +293,27 @@ func (s *SystemCollector) Collect(ch chan<- prometheus.Metric) {
 						}
 					}
 
-					// Process Dell battery information (vendor-specific)
-					// Only process Dell battery info if we detect Dell-specific data
-					if storage.OEM != nil {
-						// Check if this is a Dell system by looking for Dell-specific data
-						var oemMap map[string]interface{}
-						if err := json.Unmarshal(storage.OEM, &oemMap); err == nil {
-							if dellOem, ok := oemMap["Dell"].(map[string]interface{}); ok {
-								if _, hasDellBattery := dellOem["DellControllerBattery"]; hasDellBattery {
-									systemLogger.Debug("Detected Dell system, processing Dell battery info", slog.String("storage", storage.ID))
-									processDellBatteryInfo(ch, systemHostName, storage, systemLogger)
+					// Process vendor-specific battery information based on system manufacturer
+					manufacturer := strings.ToLower(system.Manufacturer)
+
+					if strings.Contains(manufacturer, "dell") {
+						// Process Dell battery information
+						if storage.OEM != nil {
+							// Check if this is a Dell system by looking for Dell-specific data
+							var oemMap map[string]interface{}
+							if err := json.Unmarshal(storage.OEM, &oemMap); err == nil {
+								if dellOem, ok := oemMap["Dell"].(map[string]interface{}); ok {
+									if _, hasDellBattery := dellOem["DellControllerBattery"]; hasDellBattery {
+										systemLogger.Debug("Detected Dell system, processing Dell battery info", slog.String("storage", storage.ID))
+										processDellBatteryInfo(ch, systemHostName, storage, systemLogger)
+									}
 								}
 							}
 						}
+					} else if strings.Contains(manufacturer, "hpe") {
+						// Process HPE battery information with storage controller context
+						systemLogger.Debug("Detected HPE system, processing HPE battery info", slog.String("storage", storage.ID))
+						processHpeBatteryInfo(ch, systemHostName, system, storage, systemLogger)
 					}
 				}
 			}
@@ -427,14 +443,23 @@ func parseProcessor(ch chan<- prometheus.Metric, systemHostName string, processo
 	ch <- prometheus.MustNewConstMetric(systemMetrics["system_processor_total_cores"].desc, prometheus.GaugeValue, float64(processorTotalCores), systemProcessorLabelValues...)
 }
 
-func parseVolume(ch chan<- prometheus.Metric, systemHostName string, volume *redfish.Volume, wg *sync.WaitGroup) {
+func parseVolume(ch chan<- prometheus.Metric, systemHostName string, volume *redfish.Volume, storageID, storageControllerName, storageControllerID string, wg *sync.WaitGroup) {
 	defer wg.Done()
 	volumeName := volume.Name
 	volumeID := volume.ID
 	volumeCapacityBytes := volume.CapacityBytes
 	volumeState := volume.Status.State
 	volumeHealthState := volume.Status.Health
-	systemVolumeLabelValues := []string{systemHostName, "volume", volumeName, volumeID}
+
+	systemVolumeLabelValues := []string{systemHostName, "volume", volumeName, volumeID, storageID, storageControllerName, storageControllerID}
+
+	// Debug logging for troubleshooting
+	slog.Debug("Processing volume",
+		slog.String("volume_name", volumeName),
+		slog.String("volume_id", volumeID),
+		slog.String("storage_id", storageID),
+		slog.String("storage_controller_name", storageControllerName),
+		slog.String("storage_controller_id", storageControllerID))
 	if volumeStateValue, ok := parseCommonStatusState(volumeState); ok {
 		ch <- prometheus.MustNewConstMetric(systemMetrics["system_storage_volume_state"].desc, prometheus.GaugeValue, volumeStateValue, systemVolumeLabelValues...)
 	}
@@ -560,6 +585,7 @@ func parseStorageController(ch chan<- prometheus.Metric, systemHostName string, 
 	storageControllerID := storageController.ID
 	storageControllerState := storageController.Status.State
 	storageControllerHealthState := storageController.Status.Health
+	storageControllerSerialNumber := storageController.SerialNumber
 
 	logger.Debug("Processing storage controller",
 		slog.String("storage_controller_name", storageControllerName),
@@ -567,7 +593,7 @@ func parseStorageController(ch chan<- prometheus.Metric, systemHostName string, 
 		slog.String("storage_controller_state", string(storageControllerState)),
 		slog.String("storage_controller_health", string(storageControllerHealthState)))
 
-	systemStorageControllerLabelValues := []string{systemHostName, "storage_controller", storageControllerName, storageControllerID}
+	systemStorageControllerLabelValues := []string{systemHostName, "storage_controller", storageControllerName, storageControllerID, storageControllerSerialNumber}
 
 	if storageControllerStateValue, ok := parseCommonStatusState(storageControllerState); ok {
 		ch <- prometheus.MustNewConstMetric(systemMetrics["system_storage_controller_state"].desc, prometheus.GaugeValue, storageControllerStateValue, systemStorageControllerLabelValues...)
@@ -582,54 +608,6 @@ func parseStorageController(ch chan<- prometheus.Metric, systemHostName string, 
 			slog.Float64("health_value", storageControllerHealthStateValue))
 	}
 
-	// Process batteries for this storage controller
-	batteries, err := storageController.Batteries()
-	if err != nil {
-		// Log error but continue processing other metrics
-		logger.Debug("No batteries found for storage controller",
-			slog.String("storage_controller", storageControllerName),
-			slog.String("error", err.Error()))
-	} else if batteries != nil && len(batteries) > 0 {
-		logger.Debug("Found batteries for storage controller",
-			slog.String("storage_controller", storageControllerName),
-			slog.Int("battery_count", len(batteries)))
-
-		for _, battery := range batteries {
-			parseStorageControllerBattery(ch, systemHostName, storageControllerName, storageControllerID, battery, logger)
-		}
-	} else {
-		logger.Debug("No batteries available for storage controller",
-			slog.String("storage_controller", storageControllerName))
-	}
-}
-
-func parseStorageControllerBattery(ch chan<- prometheus.Metric, systemHostName, storageControllerName, storageControllerID string, battery *redfish.Battery, logger *slog.Logger) {
-	batteryName := battery.Name
-	batteryID := battery.ID
-	batteryPartNumber := battery.PartNumber
-	batteryState := battery.Status.State
-	batteryHealthState := battery.Status.Health
-	batteryChargeState := battery.ChargeState
-
-	logger.Debug("Processing battery",
-		slog.String("storage_controller", storageControllerName),
-		slog.String("battery_name", batteryName),
-		slog.String("battery_id", batteryID),
-		slog.String("battery_state", string(batteryState)),
-		slog.String("battery_health", string(batteryHealthState)),
-		slog.String("battery_charge_state", string(batteryChargeState)))
-
-	systemStorageControllerBatteryLabelValues := []string{systemHostName, "storage_controller", storageControllerName, storageControllerID, batteryName, batteryID, batteryPartNumber}
-
-	if batteryStateValue, ok := parseCommonStatusState(batteryState); ok {
-		ch <- prometheus.MustNewConstMetric(systemMetrics["system_storage_controller_battery_state"].desc, prometheus.GaugeValue, batteryStateValue, systemStorageControllerBatteryLabelValues...)
-	}
-	if batteryHealthStateValue, ok := parseCommonStatusHealth(batteryHealthState); ok {
-		ch <- prometheus.MustNewConstMetric(systemMetrics["system_storage_controller_battery_health_state"].desc, prometheus.GaugeValue, batteryHealthStateValue, systemStorageControllerBatteryLabelValues...)
-	}
-	if batteryChargeStateValue, ok := parseCommonChargeState(batteryChargeState); ok {
-		ch <- prometheus.MustNewConstMetric(systemMetrics["system_storage_controller_battery_charge_state"].desc, prometheus.GaugeValue, batteryChargeStateValue, systemStorageControllerBatteryLabelValues...)
-	}
 }
 
 func processDellBatteryInfo(ch chan<- prometheus.Metric, systemHostName string, storage *redfish.Storage, logger *slog.Logger) {
@@ -707,7 +685,7 @@ func processDellBatteryMap(ch chan<- prometheus.Metric, systemHostName string, s
 	}
 
 	// Compose labels
-	labels := []string{systemHostName, "storage_controller", storage.Name, storage.ID, batteryName, batteryID, ""}
+	labels := []string{systemHostName, "storage_controller", storage.Name, storage.ID, batteryName, batteryID}
 
 	// State and health mapping
 	stateValue := 1 // Enabled
@@ -780,4 +758,48 @@ func processOEMField(ch chan<- prometheus.Metric, systemHostName string, storage
 	}
 
 	logger.Debug("No valid DellControllerBattery data found", slog.String("storage", storage.ID))
+}
+
+func processHpeBatteryInfo(ch chan<- prometheus.Metric, systemHostName string, system *redfish.ComputerSystem, storage *redfish.Storage, logger *slog.Logger) {
+	logger.Debug("Processing HPE battery info", slog.String("system", system.ID))
+
+	// Check for HPE battery info in Systems OEM data first
+	if system.OEM != nil {
+		var oemMap map[string]interface{}
+		if err := json.Unmarshal(system.OEM, &oemMap); err == nil {
+			if hpeOem, ok := oemMap["Hpe"].(map[string]interface{}); ok {
+				if aggregateHealth, ok := hpeOem["AggregateHealthStatus"].(map[string]interface{}); ok {
+					if smartStorageBattery, ok := aggregateHealth["SmartStorageBattery"].(map[string]interface{}); ok {
+						if status, ok := smartStorageBattery["Status"].(map[string]interface{}); ok {
+							if health, ok := status["Health"].(string); ok {
+								logger.Debug("Found HPE battery health in Systems OEM",
+									slog.String("system", system.ID),
+									slog.String("health", health))
+
+								// Process the health status
+								healthValue := 1 // OK
+								if health != "OK" {
+									healthValue = 3 // Critical
+								}
+
+								// Get storage controller information for HPE battery
+								storageControllerName := storage.Name
+								storageControllerID := storage.ID
+
+								// Create labels for HPE battery from Systems data
+								labels := []string{systemHostName, "storage_controller", storageControllerName, storageControllerID, "HPE Smart Storage Battery", "1"}
+
+								ch <- prometheus.MustNewConstMetric(systemMetrics["system_storage_controller_battery_health_state"].desc, prometheus.GaugeValue, float64(healthValue), labels...)
+
+								logger.Debug("Added HPE battery health metric from Systems OEM",
+									slog.String("system", system.ID),
+									slog.String("health", health),
+									slog.Float64("health_value", float64(healthValue)))
+							}
+						}
+					}
+				}
+			}
+		}
+	}
 }
